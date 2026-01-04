@@ -14,9 +14,25 @@ android {
         minSdk = 24 // 建议 24+，如果为了自动截图方便最好 30+
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.99.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                if (variant.buildType.name == "release") {
+                    // 定义文件名格式，例如: MushroomScanner_v1.1.0.apk
+                    val appName = "MushroomScanner"
+                    val versionName = variant.versionName
+                    val fileName = "${appName}_v${versionName}_${variant.versionCode}.apk"
+
+                    output.outputFileName = fileName
+                }
+            }
     }
 
     buildTypes {
