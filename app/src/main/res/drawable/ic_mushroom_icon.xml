@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 蘑菇柄 -->
+    <path
+        android:fillColor="#FFEEE0"
+        android:pathData="M10,14 L10,20 C10,21.1 10.9,22 12,22 C13.1,22 14,21.1 14,20 L14,14 Z"/>
+    
+    <!-- 蘑菇伞盖 -->
+    <path
+        android:fillColor="#F44336"
+        android:pathData="M12,2 C6.48,2 2,6.48 2,12 C2,12.8 2.3,13.5 2.8,14 L21.2,14 C21.7,13.5 22,12.8 22,12 C22,6.48 17.52,2 12,2 Z"/>
+        
+    <!-- 白色斑点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M7,8 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M17,8 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,5 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M4,11 a1.0,1.0 0 1,0 2,0 a1.0,1.0 0 1,0 -2,0"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,11 a1.0,1.0 0 1,0 2,0 a1.0,1.0 0 1,0 -2,0"/>
+</vector>

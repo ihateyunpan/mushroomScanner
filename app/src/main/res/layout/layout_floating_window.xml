@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:animateLayoutChanges="true">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- 左侧菜单栏 -->
+        <LinearLayout
+            android:id="@+id/layout_menu_left"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_menu_rounded"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone"
+            android:elevation="4dp"
+            android:layout_marginEnd="-12dp">
+            
+            <include layout="@layout/layout_menu_buttons" />
+            
+        </LinearLayout>
+
+        <!-- 悬浮球 (常驻) -->
+        <FrameLayout
+            android:id="@+id/layout_icon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_floating_icon"
+            android:elevation="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="🍄"
+                android:textSize="24sp" />
+        </FrameLayout>
+
+        <!-- 右侧菜单栏 -->
+        <LinearLayout
+            android:id="@+id/layout_menu_right"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_menu_rounded"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone"
+            android:elevation="4dp"
+            android:layout_marginStart="-12dp">
+
+             <!-- 这里需要动态填充，或者 include 同样的一套按钮 -->
+            <include layout="@layout/layout_menu_buttons" />
+
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 日志面板 (下方) -->
+    <LinearLayout
+        android:id="@+id/layout_logs"
+        android:layout_width="220dp"
+        android:layout_height="wrap_content"
+        android:background="#F0F0F0"
+        android:elevation="4dp"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:layout_marginTop="8dp"
+        android:visibility="gone">
+        
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="实时日志:"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:background="#FFFFFF"
+            android:padding="4dp">
+
+            <TextView
+                android:id="@+id/tv_logs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#333333"
+                android:textSize="10sp" />
+        </ScrollView>
+    </LinearLayout>
+
+</LinearLayout>
