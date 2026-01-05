@@ -17,6 +17,21 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        applicationVariants.all {
+            val variant = this
+            variant.outputs
+                .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+                .forEach { output ->
+                    if (variant.buildType.name == "release") {
+                        // 定义文件名格式，例如: MushroomScanner_v1.1.0.apk
+                        val appName = "MushroomScanner"
+                        val versionName = variant.versionName
+                        val fileName = "${appName}_v${versionName}_${variant.versionCode}.apk"
+                        output.outputFileName = fileName
+                    }
+                }
+        }
+
         // 【关键】指定 NDK 架构
         ndk {
             abiFilters.add("arm64-v8a")

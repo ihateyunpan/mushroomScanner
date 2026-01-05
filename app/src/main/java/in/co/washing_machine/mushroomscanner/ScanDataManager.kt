@@ -63,24 +63,36 @@ object ScanDataManager {
         logBuilder.append(processedMsg).append("<br>")
         val spanned: Spanned = Html.fromHtml(logBuilder.toString(), Html.FROM_HTML_MODE_COMPACT)
         logList.postValue(spanned)
-        // 【持久化】保存日志 (注意：日志过多可能会影响性能，这里简单实现，生产环境建议限制长度)
+        // 【持久化】保存日志
         if (context != null) saveLogData(context, logBuilder.toString())
     }
 
     private fun processLogMessage(msg: String): String {
-        if (msg.startsWith("RAW:") && msg.trim().endsWith("菌")) {
-            return "<font color='#FF9800'><b>$msg</b></font>"
+        // 1. 处理 RAW 识别结果的高亮
+        // 日志格式通常为 "RAW: 文本 (置信度)"，例如 "RAW: 松茸菌 (0.98)"
+        // 因此我们检查是否包含 "菌 (" 或 "荪 ("，或者直接以此结尾（防止格式变化）
+        if (msg.startsWith("RAW:")) {
+            if (msg.contains("芝 (") || msg.contains("菌 (") || msg.contains("荪 (") ||
+                msg.trim().endsWith("菌") || msg.trim().endsWith("荪")
+            ) {
+                return "<font color='#FF9800'><b>$msg</b></font>"
+            }
         }
+
+        // 2. 处理匹配成功的高亮
         if (msg.contains("✨ 模糊匹配") || msg.contains("🎯 精确匹配")) {
             return "<font color='#4CAF50'><b>$msg</b></font>"
         }
+
+        // 3. 处理错误信息的高亮
         if (msg.contains("❌") || msg.contains("🛑")) {
             return "<font color='#F44336'>$msg</font>"
         }
+
         return msg.replace("<", "&lt;").replace(">", "&gt;")
     }
 
-    // --- Config Update Methods (保持不变) ---
+    // --- Config Update Methods ---
     fun updateScanRegion(topRatio: Float, bottomRatio: Float) {
         scanRegionConfig = Pair(topRatio, bottomRatio)
     }
@@ -114,16 +126,13 @@ object ScanDataManager {
         editor.apply()
     }
 
-    // 【新增】保存菌子列表
     private fun saveMushroomData(context: Context, list: List<String>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putStringSet(KEY_SAVED_MUSHROOMS, list.toSet()).apply()
     }
 
-    // 【新增】保存日志
     private fun saveLogData(context: Context, htmlLog: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        // 限制日志长度防止 SP 爆掉，只保留最近 50000 字符
         val saveStr = if (htmlLog.length > 50000) htmlLog.takeLast(50000) else htmlLog
         prefs.edit().putString(KEY_SAVED_LOGS, saveStr).apply()
     }
@@ -148,14 +157,14 @@ object ScanDataManager {
         }
         waitAfterScrollMs = prefs.getInt(KEY_WAIT_MS, 200)
 
-        // 2. 【新增】恢复菌子列表
+        // 2. 恢复菌子列表
         val savedSet = prefs.getStringSet(KEY_SAVED_MUSHROOMS, emptySet()) ?: emptySet()
         if (savedSet.isNotEmpty()) {
             val list = savedSet.toMutableList()
             mushroomList.postValue(list)
         }
 
-        // 3. 【新增】恢复日志
+        // 3. 恢复日志
         val savedLog = prefs.getString(KEY_SAVED_LOGS, "") ?: ""
         if (savedLog.isNotEmpty()) {
             logBuilder.setLength(0)
@@ -189,14 +198,14 @@ object ScanDataManager {
 
     fun clearMushrooms(context: Context) {
         mushroomList.postValue(mutableListOf())
-        saveMushroomData(context, emptyList()) // 清空持久化
+        saveMushroomData(context, emptyList())
         onClearMushroomsCallback?.invoke()
     }
 
     fun clearLogs(context: Context) {
         logBuilder.setLength(0)
         logList.postValue("")
-        saveLogData(context, "") // 清空持久化
+        saveLogData(context, "")
         onClearLogsCallback?.invoke()
     }
 }

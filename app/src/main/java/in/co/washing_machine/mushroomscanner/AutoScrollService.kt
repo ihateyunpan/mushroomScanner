@@ -1039,7 +1039,10 @@ class AutoScrollService : AccessibilityService() {
             Pair('茵', '菌') to 0.1, Pair('菌', '茵') to 0.1, Pair('菇', '姑') to 0.2,
             Pair('手', '毛') to 0.3, Pair('日', '曰') to 0.1, Pair('末', '未') to 0.1,
             Pair('土', '士') to 0.1, Pair('全', '金') to 0.1, Pair('大', '太') to 0.2,
-            Pair('前', '茄') to 0.2, Pair('苏', '荪') to 0.1
+            Pair('前', '茄') to 0.2, Pair('苏', '荪') to 0.1, Pair('芝', '艺') to 0.1,
+            Pair('艺', '芝') to 0.1, Pair('菜', '采') to 0.1, Pair('采', '菜') to 0.1,
+            Pair('庸', '唐') to 0.1, Pair('庸', '康') to 0.1, Pair('唐', '庸') to 0.1,
+            Pair('康', '庸') to 0.1
         )
 
         fun findBestMatch(ocrText: String, candidates: List<String>): String? {
