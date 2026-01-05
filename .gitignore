@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+app/release
+app/OpenCV
+app/PaddleLite
+app/src/main/jniLibs
