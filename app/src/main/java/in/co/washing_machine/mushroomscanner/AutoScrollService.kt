@@ -2,15 +2,22 @@ package `in`.co.washing_machine.mushroomscanner
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.ContextThemeWrapper
@@ -33,6 +40,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import `in`.co.washing_machine.mushroomscanner.ocr.OcrResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,18 +57,16 @@ class AutoScrollService : AccessibilityService() {
 
     private val windowManager by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
 
-    // 基础布局 Flag
     private val BASE_LAYOUT_FLAGS = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
 
-    // 窗口引用
     private var floatingView: View? = null
     private var floatParams: WindowManager.LayoutParams? = null
     private var overlayLayout: View? = null
     private var overlayParams: WindowManager.LayoutParams? = null
     private var overlayView: OverlayView? = null
 
-    // UI 组件
+    // UI Components
     private var layoutMenuLeft: View? = null
     private var layoutMenuRight: View? = null
     private var layoutLogs: View? = null
@@ -80,7 +86,6 @@ class AutoScrollService : AccessibilityService() {
     private var layoutNotificationBar: View? = null
     private var tvOverlayNotification: TextView? = null
 
-    // 状态控制
     private var isScanning = false
     private var isPaused = false
     private var isCheckingEnvironment = false
@@ -89,7 +94,6 @@ class AutoScrollService : AccessibilityService() {
 
     private var configState = ConfigState.NONE
 
-    // 扫描数据
     private val collectedMushrooms = mutableSetOf<String>()
     private var scrollCount = 0
     private var screenHeight = 0
@@ -98,7 +102,6 @@ class AutoScrollService : AccessibilityService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
-    // --- PaddleOCR 引擎 ---
     private val ocrEngine by lazy { Native() }
     private var isOcrInitialized = false
 
@@ -116,64 +119,90 @@ class AutoScrollService : AccessibilityService() {
     override fun onServiceConnected() {
         Log.d("Mushroom", "Service Connected")
 
-        // 初始化 PaddleOCR (在 IO 线程进行)
+        // 启动前台服务保活
+        startForegroundServiceNotification()
+
+        tryRequestIgnoreBatteryOptimizations()
+
         serviceScope.launch(Dispatchers.IO) {
             initPaddleOcr()
         }
 
         setupWindows()
-
-        // 【新增】注册数据同步监听器
         registerSyncListeners()
+
+        val savedList = ScanDataManager.mushroomList.value ?: emptyList()
+        collectedMushrooms.addAll(savedList)
     }
 
-    /**
-     * 注册来自 ScanDataManager 的清空事件监听
-     * 这样无论是 App 点击清空，还是悬浮窗点击清空，都会触发这里的逻辑
-     */
-    private fun registerSyncListeners() {
-        // 1. 监听清空菌子列表事件
-        ScanDataManager.setOnClearMushroomsListener {
-            collectedMushrooms.clear() // 清空本地去重集合
-            // 可选：显示提示
-            // showNotificationText("列表已重置")
+    private fun startForegroundServiceNotification() {
+        val channelId = "MushroomServiceChannel"
+        val channelName = "菌子扫描服务"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val chan =
+                NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH)
+            chan.lightColor = Color.BLUE
+            chan.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(chan)
         }
 
-        // 2. 监听清空日志事件
-        ScanDataManager.setOnClearLogsListener {
-            serviceScope.launch(Dispatchers.Main) {
-                tvLogs?.text = "" // 清空悬浮窗日志显示
+        val notificationBuilder = NotificationCompat.Builder(this, channelId)
+        val notification = notificationBuilder.setOngoing(true)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("菌子扫描仪正在运行")
+            .setContentText("点击此处管理服务")
+            .setPriority(NotificationManager.IMPORTANCE_HIGH)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
+
+        startForeground(110, notification)
+    }
+
+    private fun tryRequestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+            val packageName = packageName
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent()
+                    intent.action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    intent.data = Uri.parse("package:$packageName")
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    startActivity(intent)
+                    appendLog("🔋 请允许“忽略电池优化”以防止杀后台")
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
 
-    /**
-     * 初始化 OCR 引擎：复制模型文件并调用 Native.init
-     */
+    private fun registerSyncListeners() {
+        ScanDataManager.setOnClearMushroomsListener {
+            collectedMushrooms.clear()
+        }
+        ScanDataManager.setOnClearLogsListener {
+            serviceScope.launch(Dispatchers.Main) {
+                tvLogs?.text = ""
+            }
+        }
+    }
+
     private suspend fun initPaddleOcr() {
         try {
-            val filesDir = getExternalFilesDir(null)?.absolutePath ?: return
-
-            // 1. 复制模型文件到私有目录
-            // 注意：请确保 assets 目录结构正确:
-            // src/main/assets/models/ch_ppocr_mobile_v2.0_det_slim_opt.nb
-            // src/main/assets/models/ch_ppocr_mobile_v2.0_rec_slim_opt.nb
-            // src/main/assets/labels/custom_keys.txt
-            // src/main/assets/config.txt (如果有)
-
             val detPath = copyAssetResource("models/ch_ppocr_mobile_v2.0_det_slim_opt.nb")
             val recPath = copyAssetResource("models/ch_ppocr_mobile_v2.0_rec_slim_opt.nb")
             val clsPath = ""
             val labelPath = copyAssetResource("labels/ppocr_keys_v1.txt")
-            val configPath = copyAssetResource("config.txt") // 确保 assets 根目录或 models 下有 config.txt
+            val configPath = copyAssetResource("config.txt")
 
             if (detPath.isEmpty() || recPath.isEmpty() || labelPath.isEmpty()) {
                 withContext(Dispatchers.Main) { appendLog("❌ 模型文件复制失败，请检查 Assets") }
                 return
             }
 
-            // 2. 初始化 Native 引擎
-            // 注意 Native.init 返回 false 表示成功 (ctx != 0)，返回 true 表示失败
             val initFailed = ocrEngine.init(
                 this@AutoScrollService,
                 detPath,
@@ -181,7 +210,7 @@ class AutoScrollService : AccessibilityService() {
                 recPath,
                 configPath,
                 labelPath,
-                4, // 线程数
+                4,
                 "LITE_POWER_HIGH"
             )
 
@@ -206,7 +235,6 @@ class AutoScrollService : AccessibilityService() {
         try {
             val fileName = File(assetPath).name
             val outFile = File(getExternalFilesDir(null), fileName)
-            // 如果文件已存在且大小 > 0，可以跳过复制（开发调试时建议每次覆盖，或者检查版本）
             if (outFile.exists() && outFile.length() > 0) return outFile.absolutePath
 
             assets.open(assetPath).use { input ->
@@ -323,7 +351,6 @@ class AutoScrollService : AccessibilityService() {
         } catch (e: Exception) {
         }
         setupWindows()
-        // 【关键】重置窗口时重新注册监听，因为 View 可能被重建
         registerSyncListeners()
     }
 
@@ -350,10 +377,6 @@ class AutoScrollService : AccessibilityService() {
         parent.findViewById<ImageButton>(R.id.btn_settings)
             ?.setOnClickListener { openSettingsMenu() }
     }
-
-    // ===========================
-    //       配置模式逻辑
-    // ===========================
 
     private fun openSettingsMenu() {
         if (isScanning) return
@@ -519,17 +542,12 @@ class AutoScrollService : AccessibilityService() {
         return super.onKeyEvent(event)
     }
 
-    // ===========================
-    //       扫描核心逻辑
-    // ===========================
-
     private fun toggleScan() {
         if (isScanning) {
             stopScanning("用户手动停止")
         } else {
             if (!isOcrInitialized) {
                 Toast.makeText(this, "⚠️ OCR 引擎尚未初始化或初始化失败", Toast.LENGTH_SHORT).show()
-                // 尝试重新初始化
                 serviceScope.launch(Dispatchers.IO) { initPaddleOcr() }
                 return
             }
@@ -549,6 +567,7 @@ class AutoScrollService : AccessibilityService() {
         if (isCheckingEnvironment) return
         isCheckingEnvironment = true
         appendLog("🔍 正在检测当前页面...")
+
         serviceScope.launch {
             val wasMenuVisible =
                 (layoutMenuLeft?.visibility == View.VISIBLE || layoutMenuRight?.visibility == View.VISIBLE)
@@ -563,25 +582,30 @@ class AutoScrollService : AccessibilityService() {
                     return@takeScreenshotSingle
                 }
 
-                // 切换到 IO 线程执行 OCR
                 serviceScope.launch(Dispatchers.IO) {
-                    // 使用 Native 接口识别
-                    val results =
-                        ocrEngine.runImage(
-                            bitmap,
-                            File(getExternalFilesDir(null), "debug_images").toString()
-                        )
+                    val results = ocrEngine.runImage(
+                        bitmap,
+                        File(getExternalFilesDir(null), "debug_images").toString()
+                    )
                     val allText = results.joinToString(" ") { it.label }
+                    var isTargetPage = false
 
-                    Log.d("识别出文字：", allText)
-                    withContext(Dispatchers.Main) {
-                        restorePanelAndLog("识别出文字：" + allText, wasMenuVisible)
+                    val titleResult = results.find { it.label.contains("菌子图鉴") }
+                    if (titleResult != null) {
+                        val centerY = titleResult.rect.centerY()
+                        if (centerY < bitmap.height / 2) {
+                            isTargetPage = true
+                            appendLog("✅ 识别到标题位于上半部: y=$centerY")
+                        } else {
+                            appendLog("⚠️ 发现标题但位置靠下: y=$centerY")
+                        }
                     }
 
-                    val isTargetPage =
-                        allText.contains("菌子图鉴") || (allText.contains("收集度") && allText.contains(
-                            "菌子"
-                        ))
+                    if (!isTargetPage) {
+                        if (allText.contains("收集度") && allText.contains("菌子")) {
+                            isTargetPage = true
+                        }
+                    }
 
                     withContext(Dispatchers.Main) {
                         if (isTargetPage) {
@@ -607,7 +631,6 @@ class AutoScrollService : AccessibilityService() {
         showNotificationText("🚀 扫描已开始 (PaddleOCR)")
 
         val (topRatio, bottomRatio) = ScanDataManager.scanRegionConfig ?: Pair(0.0f, 0.0f)
-
         serviceScope.launch {
             updateRegionUI(topRatio, bottomRatio)
             viewDimTop?.visibility = View.VISIBLE
@@ -624,13 +647,11 @@ class AutoScrollService : AccessibilityService() {
         isPaused = false
         updateToggleButtonIcon(R.drawable.ic_play)
         showTemporaryNotification("🛑 $reason")
-
         serviceScope.launch {
             delay(3000)
             layoutNotificationBar?.visibility = View.GONE
             overlayView?.clearRects()
         }
-
         val resultString = collectedMushrooms.joinToString("\n")
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("Mushrooms", resultString))
@@ -669,34 +690,25 @@ class AutoScrollService : AccessibilityService() {
         if (!isScanning) return
         val (topRatio, bottomRatio) = ScanDataManager.scanRegionConfig ?: Pair(0.0f, 0.0f)
 
-        // 打印一下裁剪参数，辅助排查
-        Log.d("MushroomDebug", "全图尺寸: w=${fullBitmap.width}, h=${fullBitmap.height}")
-        Log.d("MushroomDebug", "裁剪比例: top=$topRatio, bottom=$bottomRatio")
-
         val cropY = (fullBitmap.height * topRatio).toInt()
         val cropHeight = (fullBitmap.height * (1.0f - topRatio - bottomRatio)).toInt()
-
-        Log.d("MushroomDebug", "计算裁剪区域: y=$cropY, h=$cropHeight")
 
         if (cropHeight <= 0) {
             stopScanning("区域无效: h=$cropHeight"); return
         }
 
-        // 1. 先进行裁剪 (这步得到的 croppedBitmap 可能会共享原图内存)
+        // 1. 初步裁剪
         val tempBitmap = Bitmap.createBitmap(fullBitmap, 0, cropY, fullBitmap.width, cropHeight)
 
-        // 2. 【关键修复】强制深拷贝！
+        // 2. 【核心修复】调整尺寸为32倍数 + 解决 Stride 问题
         val finalBitmap = resizeTo32Multiple(tempBitmap)
 
-        // 3. 回收临时对象 (可选，帮助 GC)
         if (tempBitmap != fullBitmap && !tempBitmap.isRecycled) {
             tempBitmap.recycle()
         }
 
-        // --- PaddleOCR 核心处理 ---
         serviceScope.launch(Dispatchers.IO) {
             try {
-                // 调用 JNI 接口
                 val results: ArrayList<OcrResult> = ocrEngine.runImage(
                     finalBitmap,
                     File(getExternalFilesDir(null), "debug_images").toString()
@@ -712,7 +724,6 @@ class AutoScrollService : AccessibilityService() {
                         val ocrText = result.label.trim()
                         val confidence = result.confidence
 
-                        // 过滤低置信度结果，根据实际效果调整阈值
                         if (ocrText.isEmpty() || confidence < 0.6f) continue
 
                         appendLog("RAW: $ocrText ($confidence)")
@@ -720,13 +731,11 @@ class AutoScrollService : AccessibilityService() {
                         var matchedName: String? = null
                         var isFuzzy = false
 
-                        // A. 精确匹配
                         val exactMatch = MushroomData.allNames.find { ocrText.contains(it) }
 
                         if (exactMatch != null) {
                             matchedName = exactMatch
                         } else {
-                            // B. 模糊匹配
                             val fuzzyMatch =
                                 EnhancedFuzzyMatcher.findBestMatch(ocrText, MushroomData.allNames)
                             if (fuzzyMatch != null) {
@@ -741,12 +750,9 @@ class AutoScrollService : AccessibilityService() {
                             } else {
                                 val logPrefix = if (isFuzzy) "✨ 模糊匹配" else "🎯 精确匹配"
                                 appendLog("$logPrefix: $matchedName")
-
                                 collectedMushrooms.add(matchedName)
-                                ScanDataManager.addMushroom(matchedName)
+                                ScanDataManager.addMushroom(matchedName, this@AutoScrollService)
                                 matchedNamesUI.add(matchedName)
-
-                                // 坐标转换: OCR 结果是相对于 croppedBitmap 的，需加上 cropY
                                 val rect = result.rect
                                 rect.offset(0, cropY)
                                 matchedRects.add(rect)
@@ -754,7 +760,6 @@ class AutoScrollService : AccessibilityService() {
                         }
                     }
 
-                    // UI 反馈
                     if (matchedNamesUI.isNotEmpty()) {
                         showNotificationText("发现: ${matchedNamesUI.joinToString(",")}")
                         overlayView?.updateMatchedRects(matchedRects)
@@ -763,90 +768,49 @@ class AutoScrollService : AccessibilityService() {
                         overlayView?.clearRects()
                     }
 
-                    // 准备下一页
                     serviceScope.launch {
-                        delay(200) // 稍微停顿展示框选效果
+                        delay(200)
                         overlayView?.clearRects()
                         performConfiguredScroll()
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    stopScanning("OCR 运行出错: ${e.message}")
-                }
+                withContext(Dispatchers.Main) { stopScanning("OCR 运行出错: ${e.message}") }
             } finally {
-                // 用完记得回收，防止 OOM
                 if (!finalBitmap.isRecycled) finalBitmap.recycle()
             }
         }
     }
 
     /**
-     * 调试专用：保存 Bitmap 到应用私有目录
-     * 路径通常为: /sdcard/Android/data/in.co.washing_machine.mushroomscanner/files/debug_images/
-     */
-    private fun saveDebugBitmap(bitmap: Bitmap, prefix: String) {
-        try {
-            // 创建 debug_images 子目录
-            val debugDir = File(getExternalFilesDir(null), "debug_images")
-            if (!debugDir.exists()) debugDir.mkdirs()
-
-            val timestamp = System.currentTimeMillis()
-            val fileName = "${prefix}_$timestamp.jpg"
-            val file = File(debugDir, fileName)
-
-            FileOutputStream(file).use { out ->
-                // 压缩为 JPEG，质量 100
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
-            }
-            Log.d("MushroomDebug", "✅ 图片已保存: ${file.absolutePath}")
-        } catch (e: Exception) {
-            Log.e("MushroomDebug", "❌ 保存图片失败", e)
-        }
-    }
-
-    /**
-     * 将图片宽高强制调整为 32 的倍数（向上取整）
-     * 同时这也会执行 Deep Copy，解决 Stride 问题
+     * 【新函数】将图片宽高强制调整为 32 的倍数（向上取整）
+     * 同时执行 Deep Copy，解决 Stride 问题和 OCR 检测模型 Bug
      */
     private fun resizeTo32Multiple(bitmap: Bitmap): Bitmap {
         val w = bitmap.width
         val h = bitmap.height
 
-        // 1. 计算目标高度：向上取整到最近的 32 倍数
-        // 例如：高度 50 -> 64; 高度 30 -> 32
         val targetH = if (h % 32 == 0) h else ((h / 32) + 1) * 32
-
-        // 2. 计算目标宽度：保持比例，同时也必须是 32 的倍数
-        // 保持比例是为了防止文字拉伸变形影响识别
         val ratio = targetH.toFloat() / h
         var targetW = (w * ratio).toInt()
         targetW = if (targetW % 32 == 0) targetW else ((targetW / 32) + 1) * 32
-
-        // 避免宽度过小（OCR模型通常至少需要 32）
         targetW = max(32, targetW)
 
-        // 如果尺寸没变，且 Config 已经是 ARGB_8888，直接返回副本以确保 Stride 重置
         if (targetW == w && targetH == h) {
             // 必须 copy 一次以解决 Stride 问题，不能直接返回原图
             return bitmap.copy(Bitmap.Config.ARGB_8888, true)
         }
 
-        Log.d("MushroomDebug", "重置尺寸: ${w}x${h} -> ${targetW}x${targetH}")
-
-        // 3. 执行缩放 (filter=true 开启抗锯齿，效果更好)
         return Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
     }
 
     private fun performConfiguredScroll() {
         if (!isScanning) return
         val gesture = ScanDataManager.gestureProfile
-
         if (gesture != null) {
             performRecordedScroll(gesture)
         } else {
-            // 默认滚动：从下往上滑
             val path = Path().apply {
                 moveTo(screenWidth / 2f, screenHeight * 0.8f)
                 lineTo(screenWidth / 2f, screenHeight * 0.4f)
@@ -863,7 +827,6 @@ class AutoScrollService : AccessibilityService() {
             moveTo(g.startX * screenWidth, g.startY * screenHeight)
             lineTo(g.endX * screenWidth, g.endY * screenHeight)
         }
-
         if (isTestRun) {
             serviceScope.launch {
                 overlayParams?.flags =
@@ -887,7 +850,6 @@ class AutoScrollService : AccessibilityService() {
         val gestureBuilder = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
             .build()
-
         dispatchGesture(gestureBuilder, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 onFinish?.invoke()
@@ -901,7 +863,6 @@ class AutoScrollService : AccessibilityService() {
         }, null)
     }
 
-    // --- Helpers (UI相关) ---
     private fun showNotificationText(msg: String) {
         serviceScope.launch { tvOverlayNotification?.text = msg }
     }
@@ -972,12 +933,8 @@ class AutoScrollService : AccessibilityService() {
         layoutMenuRight?.findViewById<ImageButton>(R.id.btn_toggle)?.setImageResource(resId)
     }
 
-    // 【修改】这个方法是悬浮窗垃圾桶按钮的点击事件
-    // 现在只需调用 Manager 的 clearAll，通过回调来触发本地清理，保证逻辑统一
     private fun clearData() {
-        ScanDataManager.clearAll()
-        // 本地的 collectedMushrooms.clear() 和 tvLogs.text = "" 会在回调中执行
-
+        ScanDataManager.clearAll(this@AutoScrollService)
         Toast.makeText(this, "数据已清空", Toast.LENGTH_SHORT).show()
     }
 
@@ -987,7 +944,8 @@ class AutoScrollService : AccessibilityService() {
                 this,
                 MainActivity::class.java
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        ); collapseMenu()
+        )
+        collapseMenu()
     }
 
     private fun toggleLogVisibility() {
@@ -995,13 +953,15 @@ class AutoScrollService : AccessibilityService() {
             if (layoutLogs?.visibility == View.VISIBLE) View.GONE else View.VISIBLE
     }
 
+    // 【修改】简化 appendLog，无需外部传入 Context
+    // 内部直接使用 this@AutoScrollService
     private fun appendLog(msg: String) {
-        ScanDataManager.addLog(msg); serviceScope.launch {
-            tvLogs?.append("$msg\n"); scrollView?.post {
-            scrollView?.fullScroll(
-                View.FOCUS_DOWN
-            )
-        }
+        ScanDataManager.addLog(msg, this@AutoScrollService)
+        serviceScope.launch {
+            tvLogs?.append("$msg\n")
+            scrollView?.post {
+                scrollView?.fullScroll(View.FOCUS_DOWN)
+            }
         }
     }
 
@@ -1063,31 +1023,23 @@ class AutoScrollService : AccessibilityService() {
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {}
     override fun onInterrupt() {}
+
+    // 【关键修复】确保 onDestroy 不调用 System.exit 或 killProcess
     override fun onDestroy() {
-        // 解除监听防止内存泄漏
         ScanDataManager.setOnClearMushroomsListener {}
         ScanDataManager.setOnClearLogsListener {}
-
         ocrEngine.release()
         super.onDestroy()
         if (floatingView != null) windowManager.removeView(floatingView)
         if (overlayLayout != null) windowManager.removeView(overlayLayout)
     }
 
-    // 模糊匹配工具 (保留)
     object EnhancedFuzzyMatcher {
         private val CONFUSION_SETS = mapOf(
-            Pair('茵', '菌') to 0.1,
-            Pair('菌', '茵') to 0.1,
-            Pair('菇', '姑') to 0.2,
-            Pair('手', '毛') to 0.3,
-            Pair('日', '曰') to 0.1,
-            Pair('末', '未') to 0.1,
-            Pair('土', '士') to 0.1,
-            Pair('全', '金') to 0.1,
-            Pair('大', '太') to 0.2,
-            Pair('前', '茄') to 0.2,
-            Pair('苏', '荪') to 0.1
+            Pair('茵', '菌') to 0.1, Pair('菌', '茵') to 0.1, Pair('菇', '姑') to 0.2,
+            Pair('手', '毛') to 0.3, Pair('日', '曰') to 0.1, Pair('末', '未') to 0.1,
+            Pair('土', '士') to 0.1, Pair('全', '金') to 0.1, Pair('大', '太') to 0.2,
+            Pair('前', '茄') to 0.2, Pair('苏', '荪') to 0.1
         )
 
         fun findBestMatch(ocrText: String, candidates: List<String>): String? {
@@ -1110,14 +1062,13 @@ class AutoScrollService : AccessibilityService() {
         private fun calculateMaxWeightedSimilarity(source: String, target: String): Double {
             if (source.length < target.length) {
                 if (target.length - source.length > 2) return 0.0
-                val dist = weightedLevenshtein(source, target)
-                return 1.0 - (dist / target.length)
+                val dist = weightedLevenshtein(source, target); return 1.0 - (dist / target.length)
             }
             var maxSim = 0.0;
             val windowSize = target.length
             for (i in 0..source.length - windowSize) {
                 val sub = source.substring(i, i + windowSize)
-                val dist = weightedLevenshtein(sub, target)
+                val dist = weightedLevenshtein(sub, target);
                 val sim = 1.0 - (dist / max(sub.length, target.length))
                 if (sim > maxSim) maxSim = sim
             }
@@ -1132,7 +1083,7 @@ class AutoScrollService : AccessibilityService() {
             for (i in 1..n) {
                 for (j in 1..m) {
                     val c1 = s1[i - 1];
-                    val c2 = s2[j - 1]
+                    val c2 = s2[j - 1];
                     val cost = if (c1 == c2) 0.0 else CONFUSION_SETS[Pair(c1, c2)] ?: 1.0
                     dp[i][j] =
                         minOf(dp[i - 1][j] + 1.0, dp[i][j - 1] + 1.0, dp[i - 1][j - 1] + cost)

@@ -1,5 +1,3 @@
-import com.android.build.api.dsl.Packaging
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,7 +13,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.99.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -37,10 +35,10 @@ android {
     packaging {
         resources {
             // 解决 libc++_shared.so 冲突
-            pickFirsts.add("lib/arm64-v8a/libc++_shared.so")
+//            pickFirsts.add("lib/arm64-v8a/libc++_shared.so")
             // 如果还有其他冲突，也在这里添加，例如：
-            pickFirsts.add("**/libpaddle_light_api_shared.so")
-            pickFirsts.add("**/libopencv_java4.so")
+//            pickFirsts.add("**/libpaddle_light_api_shared.so")
+//            pickFirsts.add("**/libopencv_java4.so")
         }
     }
 
@@ -69,7 +67,7 @@ android {
         getByName("main") {
             // 如果你把 .so 复制到了 src/main/jniLibs，保持这行
             // 如果没有，Gradle 会尝试从 CMake 的链接结果中抓取，但推荐手动复制一份到 jniLibs
-            jniLibs.srcDirs("src/main/jniLibs")
+//            jniLibs.srcDirs("src/main/jniLibs")
         }
     }
 

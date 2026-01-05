@@ -55,6 +55,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // 【关键修复】App 启动时立即从本地 SharedPreferences 加载数据
+        // 确保即使服务没启动，也能看到之前的历史记录
+        ScanDataManager.loadConfig(this)
+
         // 启动时不强制跳转，只提示
         checkPermissions(autoRedirect = false)
         initViews()
@@ -82,14 +86,14 @@ class MainActivity : AppCompatActivity() {
             copyToClipboard(tvResultList.text.toString())
         }
         findViewById<Button>(R.id.btn_clear_results).setOnClickListener {
-            ScanDataManager.clearMushrooms()
+            ScanDataManager.clearMushrooms(this)
         }
 
         findViewById<Button>(R.id.btn_copy_logs).setOnClickListener {
             copyToClipboard(tvMainLogs.text.toString())
         }
         findViewById<Button>(R.id.btn_clear_logs).setOnClickListener {
-            ScanDataManager.clearLogs()
+            ScanDataManager.clearLogs(this)
         }
 
         // 按钮重置悬浮窗 (点击时强制检查权限)
@@ -146,6 +150,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeData() {
         ScanDataManager.mushroomList.observe(this) { list ->
+            // 这里使用了 distinct() 确保显示不重复
             val uniqueList = list.distinct()
             val count = uniqueList.size
             tvResultHeader.text = "已识别列表 (共 $count 个):"
@@ -180,10 +185,6 @@ class MainActivity : AppCompatActivity() {
 
     // --- 权限检查逻辑升级版 ---
 
-    /**
-     * 检查所有必要权限
-     * @param autoRedirect 是否在缺失权限时自动跳转设置页
-     */
     private fun checkPermissions(autoRedirect: Boolean = true): Boolean {
         // 1. 基础悬浮窗权限 (Android 标准)
         if (!Settings.canDrawOverlays(this)) {
@@ -251,9 +252,6 @@ class MainActivity : AppCompatActivity() {
         return Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
     }
 
-    /**
-     * 反射检查 MIUI 的 "后台弹出界面" 权限 (OpCode 10021)
-     */
     private fun getMiuiPopupPermission(context: Context): Boolean {
         return try {
             val appOpsManager = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -272,17 +270,12 @@ class MainActivity : AppCompatActivity() {
             ) as Int
             result == AppOpsManager.MODE_ALLOWED
         } catch (e: Exception) {
-            // 如果反射失败（比如非 MIUI 系统或 API 变动），默认返回 true 以免误杀
             true
         }
     }
 
-    /**
-     * 跳转到 MIUI 具体的权限管理页
-     */
     private fun openMiuiPermissionActivity(context: Context) {
         try {
-            // 尝试打开应用详情页 (通常这里可以找到权限管理)
             val intent = Intent("miui.intent.action.APP_PERM_EDITOR")
             intent.setClassName(
                 "com.miui.securitycenter",
@@ -292,7 +285,6 @@ class MainActivity : AppCompatActivity() {
             context.startActivity(intent)
         } catch (e: Exception) {
             try {
-                // 备用方案：打开应用详情页
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 val uri = Uri.fromParts("package", context.packageName, null)
                 intent.data = uri

@@ -45,7 +45,7 @@ cv::Mat GetRotateCropImage(const cv::Mat &srcimage, std::vector<std::vector<int>
     // 使用 clone 确保内存连续，防止 ROI 引用导致的潜在问题
     srcimage(cv::Rect(left, top, right - left, bottom - top)).copyTo(img_crop);
 
-    cv::imwrite("/storage/emulated/0/Android/data/in.co.washing_machine.mushroomscanner/files/debug_images/crop_step.jpg", img_crop);
+    // cv::imwrite("/storage/emulated/0/Android/data/in.co.washing_machine.mushroomscanner/files/debug_images/crop_step.jpg", img_crop);
 
     for (int i = 0; i < points.size(); i++) {
         points[i][0] -= left;
@@ -198,7 +198,7 @@ std::vector<OcrResultCpp> Pipeline::RunOcr(cv::Mat &srcimg) {
             continue;
         }
 
-        cv::imwrite("/storage/emulated/0/Android/data/in.co.washing_machine.mushroomscanner/files/debug_images/crop_step2.jpg", crop_img);
+        // cv::imwrite("/storage/emulated/0/Android/data/in.co.washing_machine.mushroomscanner/files/debug_images/crop_step2.jpg", crop_img);
 
         // 方向分类
         if (int(Config_["use_direction_classify"]) >= 1 && clsPredictor_) {

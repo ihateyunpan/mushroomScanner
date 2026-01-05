@@ -6,30 +6,26 @@ import android.text.Spanned
 import androidx.lifecycle.MutableLiveData
 
 object ScanDataManager {
-    // 1. 扫描到的菌子列表
+    // 数据 LiveData
     val mushroomList = MutableLiveData<MutableList<String>>(mutableListOf())
-
-    // 2. 日志列表
     val logList = MutableLiveData<CharSequence>("")
 
     private val logBuilder = StringBuilder()
 
-    // 3. 扫描区域配置
+    // 配置相关
     var scanRegionConfig: Pair<Float, Float>? = null
-
-    // 4. 自定义滑动配置
     var gestureProfile: GestureProfile? = null
     var waitAfterScrollMs: Int = 200
 
-    // 监听器
+    // 回调
     private var onResetListener: (() -> Unit)? = null
-
-    // 【新增】清空事件的监听器
     private var onClearMushroomsCallback: (() -> Unit)? = null
     private var onClearLogsCallback: (() -> Unit)? = null
 
-    // --- 持久化相关常量 ---
+    // --- 持久化常量 ---
     private const val PREFS_NAME = "MushroomPrefs"
+
+    // Config Keys
     private const val KEY_TOP_RATIO = "top_ratio"
     private const val KEY_BOTTOM_RATIO = "bottom_ratio"
     private const val KEY_HAS_CONFIG = "has_config"
@@ -40,6 +36,10 @@ object ScanDataManager {
     private const val KEY_GESTURE_DURATION = "g_dur"
     private const val KEY_WAIT_MS = "wait_ms"
 
+    // Data Persistence Keys
+    private const val KEY_SAVED_MUSHROOMS = "saved_mushrooms_set"
+    private const val KEY_SAVED_LOGS = "saved_logs_html"
+
     data class GestureProfile(
         val startX: Float, val startY: Float,
         val endX: Float, val endY: Float,
@@ -48,19 +48,23 @@ object ScanDataManager {
 
     // --- 操作方法 ---
 
-    fun addMushroom(name: String) {
+    fun addMushroom(name: String, context: Context?) {
         val currentList = mushroomList.value ?: mutableListOf()
         if (!currentList.contains(name)) {
             currentList.add(name)
             mushroomList.postValue(currentList)
+            // 【持久化】保存列表
+            if (context != null) saveMushroomData(context, currentList)
         }
     }
 
-    fun addLog(msg: String) {
+    fun addLog(msg: String, context: Context?) {
         val processedMsg = processLogMessage(msg)
         logBuilder.append(processedMsg).append("<br>")
         val spanned: Spanned = Html.fromHtml(logBuilder.toString(), Html.FROM_HTML_MODE_COMPACT)
         logList.postValue(spanned)
+        // 【持久化】保存日志 (注意：日志过多可能会影响性能，这里简单实现，生产环境建议限制长度)
+        if (context != null) saveLogData(context, logBuilder.toString())
     }
 
     private fun processLogMessage(msg: String): String {
@@ -76,6 +80,7 @@ object ScanDataManager {
         return msg.replace("<", "&lt;").replace(">", "&gt;")
     }
 
+    // --- Config Update Methods (保持不变) ---
     fun updateScanRegion(topRatio: Float, bottomRatio: Float) {
         scanRegionConfig = Pair(topRatio, bottomRatio)
     }
@@ -87,6 +92,8 @@ object ScanDataManager {
     fun updateWaitTime(ms: Int) {
         waitAfterScrollMs = ms
     }
+
+    // --- Save/Load Logic ---
 
     fun saveConfig(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -107,8 +114,24 @@ object ScanDataManager {
         editor.apply()
     }
 
+    // 【新增】保存菌子列表
+    private fun saveMushroomData(context: Context, list: List<String>) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putStringSet(KEY_SAVED_MUSHROOMS, list.toSet()).apply()
+    }
+
+    // 【新增】保存日志
+    private fun saveLogData(context: Context, htmlLog: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // 限制日志长度防止 SP 爆掉，只保留最近 50000 字符
+        val saveStr = if (htmlLog.length > 50000) htmlLog.takeLast(50000) else htmlLog
+        prefs.edit().putString(KEY_SAVED_LOGS, saveStr).apply()
+    }
+
     fun loadConfig(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        // 1. 加载配置
         if (prefs.getBoolean(KEY_HAS_CONFIG, false)) {
             val top = prefs.getFloat(KEY_TOP_RATIO, 0.1f)
             val bottom = prefs.getFloat(KEY_BOTTOM_RATIO, 0.1f)
@@ -124,18 +147,33 @@ object ScanDataManager {
             )
         }
         waitAfterScrollMs = prefs.getInt(KEY_WAIT_MS, 200)
+
+        // 2. 【新增】恢复菌子列表
+        val savedSet = prefs.getStringSet(KEY_SAVED_MUSHROOMS, emptySet()) ?: emptySet()
+        if (savedSet.isNotEmpty()) {
+            val list = savedSet.toMutableList()
+            mushroomList.postValue(list)
+        }
+
+        // 3. 【新增】恢复日志
+        val savedLog = prefs.getString(KEY_SAVED_LOGS, "") ?: ""
+        if (savedLog.isNotEmpty()) {
+            logBuilder.setLength(0)
+            logBuilder.append(savedLog)
+            val spanned: Spanned = Html.fromHtml(logBuilder.toString(), Html.FROM_HTML_MODE_COMPACT)
+            logList.postValue(spanned)
+        }
     }
 
+    // --- Listener Logic ---
     fun setOnResetListener(listener: () -> Unit) {
         onResetListener = listener
     }
 
-    // 【新增】设置清空列表的回调
     fun setOnClearMushroomsListener(listener: () -> Unit) {
         onClearMushroomsCallback = listener
     }
 
-    // 【新增】设置清空日志的回调
     fun setOnClearLogsListener(listener: () -> Unit) {
         onClearLogsCallback = listener
     }
@@ -144,24 +182,21 @@ object ScanDataManager {
         onResetListener?.invoke()
     }
 
-    // 清空所有 (会被悬浮窗的垃圾桶按钮调用)
-    fun clearAll() {
-        clearMushrooms()
-        clearLogs()
+    fun clearAll(context: Context) {
+        clearMushrooms(context)
+        clearLogs(context)
     }
 
-    // 清空菌子列表 (会被App的清空按钮调用)
-    fun clearMushrooms() {
+    fun clearMushrooms(context: Context) {
         mushroomList.postValue(mutableListOf())
-        // 通知 Service 清空本地去重集合
+        saveMushroomData(context, emptyList()) // 清空持久化
         onClearMushroomsCallback?.invoke()
     }
 
-    // 清空日志 (会被App的清空按钮调用)
-    fun clearLogs() {
+    fun clearLogs(context: Context) {
         logBuilder.setLength(0)
         logList.postValue("")
-        // 通知 Service 清空悬浮窗文本
+        saveLogData(context, "") // 清空持久化
         onClearLogsCallback?.invoke()
     }
 }
