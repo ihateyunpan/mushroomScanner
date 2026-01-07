@@ -51,7 +51,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.abs
-import kotlin.math.max
 
 class AutoScrollService : AccessibilityService() {
 
@@ -101,9 +100,6 @@ class AutoScrollService : AccessibilityService() {
     private var tempGesture: ScanDataManager.GestureProfile? = null
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
-
-    private val ocrEngine by lazy { Native() }
-    private var isOcrInitialized = false
 
     override fun onCreate() {
         super.onCreate()
@@ -191,61 +187,24 @@ class AutoScrollService : AccessibilityService() {
     }
 
     private suspend fun initPaddleOcr() {
-        try {
-            val detPath = copyAssetResource("models/ch_ppocr_mobile_v2.0_det_slim_opt.nb")
-            val recPath = copyAssetResource("models/ch_ppocr_mobile_v2.0_rec_slim_opt.nb")
-            val clsPath = ""
-            val labelPath = copyAssetResource("labels/ppocr_keys_v1.txt")
-            val configPath = copyAssetResource("config.txt")
+        // 调用 Core 初始化
+        val result = OcrCore.init(this@AutoScrollService)
 
-            if (detPath.isEmpty() || recPath.isEmpty() || labelPath.isEmpty()) {
-                withContext(Dispatchers.Main) { appendLog("❌ 模型文件复制失败，请检查 Assets") }
-                return
-            }
-
-            val initFailed = ocrEngine.init(
-                this@AutoScrollService,
-                detPath,
-                clsPath,
-                recPath,
-                configPath,
-                labelPath,
-                4,
-                "LITE_POWER_HIGH"
-            )
-
-            isOcrInitialized = !initFailed
-
-            withContext(Dispatchers.Main) {
-                if (isOcrInitialized) {
+        // 切换回主线程处理 UI 日志
+        withContext(Dispatchers.Main) {
+            when (result) {
+                is OcrCore.InitResult.Success -> {
                     appendLog("✅ PaddleOCR 引擎初始化成功")
-                } else {
-                    appendLog("❌ PaddleOCR 引擎初始化失败")
+                }
+
+                is OcrCore.InitResult.Failure -> {
+                    appendLog("❌ 初始化失败: ${result.reason}")
+                }
+
+                is OcrCore.InitResult.Error -> {
+                    appendLog("❌ OCR 初始化异常: ${result.e.message}")
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            withContext(Dispatchers.Main) {
-                appendLog("❌ OCR 初始化异常: ${e.message}")
-            }
-        }
-    }
-
-    private fun copyAssetResource(assetPath: String): String {
-        try {
-            val fileName = File(assetPath).name
-            val outFile = File(getExternalFilesDir(null), fileName)
-            if (outFile.exists() && outFile.length() > 0) return outFile.absolutePath
-
-            assets.open(assetPath).use { input ->
-                FileOutputStream(outFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            return outFile.absolutePath
-        } catch (e: Exception) {
-            Log.e("Mushroom", "Copy asset failed: $assetPath", e)
-            return ""
         }
     }
 
@@ -546,7 +505,7 @@ class AutoScrollService : AccessibilityService() {
         if (isScanning) {
             stopScanning("用户手动停止")
         } else {
-            if (!isOcrInitialized) {
+            if (!OcrCore.isInitialized) {
                 Toast.makeText(this, "⚠️ OCR 引擎尚未初始化或初始化失败", Toast.LENGTH_SHORT).show()
                 serviceScope.launch(Dispatchers.IO) { initPaddleOcr() }
                 return
@@ -583,33 +542,16 @@ class AutoScrollService : AccessibilityService() {
                 }
 
                 serviceScope.launch(Dispatchers.IO) {
-                    val results = ocrEngine.runImage(
+                    val pageCheckRes = OcrCore.isTargetPage(
                         bitmap,
+                        bitmap.height,
                         File(getExternalFilesDir(null), "debug_images").toString()
                     )
-                    val allText = results.joinToString(" ") { it.label }
-//                    appendLog(results.joinToString(" "))
-                    var isTargetPage = false
-
-                    val titleResult = results.find { it.label.contains("菌子图鉴") }
-                    if (titleResult != null) {
-                        val centerY = titleResult.rect.centerY()
-                        if (centerY < bitmap.height / 2) {
-                            isTargetPage = true
-                            appendLog("✅ 识别到标题位于上半部: y=$centerY")
-                        } else {
-                            appendLog("⚠️ 发现标题但位置靠下: y=$centerY")
-                        }
+                    if (pageCheckRes.msg != "") {
+                        appendLog(pageCheckRes.msg)
                     }
-
-                    if (!isTargetPage) {
-                        if (allText.contains("收集度") && allText.contains("菌")) {
-                            isTargetPage = true
-                        }
-                    }
-
                     withContext(Dispatchers.Main) {
-                        if (isTargetPage) {
+                        if (pageCheckRes.isTarget) {
                             isCheckingEnvironment = false
                             startScanning()
                         } else {
@@ -698,20 +640,10 @@ class AutoScrollService : AccessibilityService() {
             stopScanning("区域无效: h=$cropHeight"); return
         }
 
-        // 1. 初步裁剪
-        val tempBitmap = Bitmap.createBitmap(fullBitmap, 0, cropY, fullBitmap.width, cropHeight)
-
-        // 2. 【核心修复】调整尺寸为32倍数 + 解决 Stride 问题
-        val finalBitmap = resizeTo32Multiple(tempBitmap)
-
-        if (tempBitmap != fullBitmap && !tempBitmap.isRecycled) {
-            tempBitmap.recycle()
-        }
-
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val results: ArrayList<OcrResult> = ocrEngine.runImage(
-                    finalBitmap,
+                val results = OcrCore.scanBitmap(
+                    fullBitmap, cropY, cropHeight,
                     File(getExternalFilesDir(null), "debug_images").toString()
                 )
 
@@ -721,43 +653,20 @@ class AutoScrollService : AccessibilityService() {
                     val matchedRects = mutableListOf<Rect>()
                     val matchedNamesUI = mutableListOf<String>()
 
-                    for (result in results) {
-                        val ocrText = result.label.trim()
-                        val confidence = result.confidence
+                    for (msg in results.msgs) {
+                        appendLog(msg)
+                    }
 
-                        if (ocrText.isEmpty() || confidence < 0.6f) continue
-
-                        appendLog("RAW: $ocrText ($confidence)")
-
-                        var matchedName: String? = null
-                        var isFuzzy = false
-
-                        val exactMatch = MushroomData.allNames.find { ocrText.contains(it) }
-
-                        if (exactMatch != null) {
-                            matchedName = exactMatch
+                    for (match in results.matches) {
+                        if (collectedMushrooms.contains(match.name)) {
+                            appendLog("忽略已存在: $match.name")
                         } else {
-                            val fuzzyMatch =
-                                EnhancedFuzzyMatcher.findBestMatch(ocrText, MushroomData.allNames)
-                            if (fuzzyMatch != null) {
-                                matchedName = fuzzyMatch
-                                isFuzzy = true
-                            }
-                        }
-
-                        if (matchedName != null) {
-                            if (collectedMushrooms.contains(matchedName)) {
-                                appendLog("忽略已存在: $matchedName")
-                            } else {
-                                val logPrefix = if (isFuzzy) "✨ 模糊匹配" else "🎯 精确匹配"
-                                appendLog("$logPrefix: $matchedName")
-                                collectedMushrooms.add(matchedName)
-                                ScanDataManager.addMushroom(matchedName, this@AutoScrollService)
-                                matchedNamesUI.add(matchedName)
-                                val rect = result.rect
-                                rect.offset(0, cropY)
-                                matchedRects.add(rect)
-                            }
+                            val logPrefix = if (match.isFuzzy) "✨ 模糊匹配" else "🎯 精确匹配"
+                            appendLog("$logPrefix: ${match.name}")
+                            collectedMushrooms.add(match.name)
+                            ScanDataManager.addMushroom(match.name, this@AutoScrollService)
+                            matchedNamesUI.add(match.name)
+                            matchedRects.add(match.rect)
                         }
                     }
 
@@ -778,32 +687,8 @@ class AutoScrollService : AccessibilityService() {
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) { stopScanning("OCR 运行出错: ${e.message}") }
-            } finally {
-                if (!finalBitmap.isRecycled) finalBitmap.recycle()
             }
         }
-    }
-
-    /**
-     * 【新函数】将图片宽高强制调整为 32 的倍数（向上取整）
-     * 同时执行 Deep Copy，解决 Stride 问题和 OCR 检测模型 Bug
-     */
-    private fun resizeTo32Multiple(bitmap: Bitmap): Bitmap {
-        val w = bitmap.width
-        val h = bitmap.height
-
-        val targetH = if (h % 32 == 0) h else ((h / 32) + 1) * 32
-        val ratio = targetH.toFloat() / h
-        var targetW = (w * ratio).toInt()
-        targetW = if (targetW % 32 == 0) targetW else ((targetW / 32) + 1) * 32
-        targetW = max(32, targetW)
-
-        if (targetW == w && targetH == h) {
-            // 必须 copy 一次以解决 Stride 问题，不能直接返回原图
-            return bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        }
-
-        return Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
     }
 
     private fun performConfiguredScroll() {
@@ -1029,71 +914,9 @@ class AutoScrollService : AccessibilityService() {
     override fun onDestroy() {
         ScanDataManager.setOnClearMushroomsListener {}
         ScanDataManager.setOnClearLogsListener {}
-        ocrEngine.release()
+        OcrCore.release()
         super.onDestroy()
         if (floatingView != null) windowManager.removeView(floatingView)
         if (overlayLayout != null) windowManager.removeView(overlayLayout)
-    }
-
-    object EnhancedFuzzyMatcher {
-        private val CONFUSION_SETS = mapOf(
-            Pair('茵', '菌') to 0.1, Pair('菌', '茵') to 0.1, Pair('菇', '姑') to 0.2,
-            Pair('手', '毛') to 0.3, Pair('日', '曰') to 0.1, Pair('末', '未') to 0.1,
-            Pair('土', '士') to 0.1, Pair('全', '金') to 0.1, Pair('大', '太') to 0.2,
-            Pair('前', '茄') to 0.2, Pair('苏', '荪') to 0.1, Pair('芝', '艺') to 0.1,
-            Pair('艺', '芝') to 0.1, Pair('菜', '采') to 0.1, Pair('采', '菜') to 0.1,
-            Pair('庸', '唐') to 0.1, Pair('庸', '康') to 0.1, Pair('唐', '庸') to 0.1,
-            Pair('康', '庸') to 0.1
-        )
-
-        fun findBestMatch(ocrText: String, candidates: List<String>): String? {
-            var best: String? = null;
-            var maxScore = 0.0
-            for (target in candidates) {
-                if (abs(ocrText.length - target.length) > 3) continue
-                val score = calculateMaxWeightedSimilarity(ocrText, target)
-                if (score >= 0.75) {
-                    if (score > maxScore) {
-                        maxScore = score; best = target
-                    } else if (abs(score - maxScore) < 0.001) {
-                        if (target.length > (best?.length ?: 0)) best = target
-                    }
-                }
-            }
-            return best
-        }
-
-        private fun calculateMaxWeightedSimilarity(source: String, target: String): Double {
-            if (source.length < target.length) {
-                if (target.length - source.length > 2) return 0.0
-                val dist = weightedLevenshtein(source, target); return 1.0 - (dist / target.length)
-            }
-            var maxSim = 0.0;
-            val windowSize = target.length
-            for (i in 0..source.length - windowSize) {
-                val sub = source.substring(i, i + windowSize)
-                val dist = weightedLevenshtein(sub, target);
-                val sim = 1.0 - (dist / max(sub.length, target.length))
-                if (sim > maxSim) maxSim = sim
-            }
-            return maxSim
-        }
-
-        private fun weightedLevenshtein(s1: String, s2: String): Double {
-            val n = s1.length;
-            val m = s2.length;
-            var dp = Array(n + 1) { DoubleArray(m + 1) }
-            for (i in 0..n) dp[i][0] = i.toDouble(); for (j in 0..m) dp[0][j] = j.toDouble()
-            for (i in 1..n) {
-                for (j in 1..m) {
-                    val c1 = s1[i - 1];
-                    val c2 = s2[j - 1];
-                    val cost = if (c1 == c2) 0.0 else CONFUSION_SETS[Pair(c1, c2)] ?: 1.0
-                    dp[i][j] =
-                        minOf(dp[i - 1][j] + 1.0, dp[i][j - 1] + 1.0, dp[i - 1][j - 1] + cost)
-                }
-            }
-            return dp[n][m]
-        }
     }
 }

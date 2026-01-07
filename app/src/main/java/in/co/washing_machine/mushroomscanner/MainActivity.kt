@@ -95,6 +95,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_clear_logs).setOnClickListener {
             ScanDataManager.clearLogs(this)
         }
+        findViewById<Button>(R.id.btn_video_analysis).setOnClickListener {
+            val intent = Intent(this, VideoAnalysisActivity::class.java)
+            startActivity(intent)
+        }
 
         // 按钮重置悬浮窗 (点击时强制检查权限)
         btnResetFloating.setOnClickListener {
