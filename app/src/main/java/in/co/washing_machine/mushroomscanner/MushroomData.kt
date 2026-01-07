@@ -1292,7 +1292,7 @@ object MushroomData {
         ),
         Mushroom(
             id = "deer14",
-            name = "巨型二刺螈鹿角菌",
+            name = "巨体二刺螈鹿角菌",
             starter = "DEER",
             wood = "YAN",
             light = "HUN",
@@ -1406,7 +1406,7 @@ object MushroomData {
         ),
         Mushroom(
             id = "cai8",
-            name = "大型水平太菜菜菜菌",
+            name = "大型水平太菜菜菌",
             starter = "CAI",
             wood = "YAN",
             light = "HUN",
@@ -1446,7 +1446,7 @@ object MushroomData {
         ),
         Mushroom(
             id = "cai12",
-            name = "小型水平太菜菜菜菌",
+            name = "小型水平太菜菜菌",
             starter = "CAI",
             wood = "YAN",
             light = "HUN",

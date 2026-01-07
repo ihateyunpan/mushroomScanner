@@ -588,6 +588,7 @@ class AutoScrollService : AccessibilityService() {
                         File(getExternalFilesDir(null), "debug_images").toString()
                     )
                     val allText = results.joinToString(" ") { it.label }
+//                    appendLog(results.joinToString(" "))
                     var isTargetPage = false
 
                     val titleResult = results.find { it.label.contains("菌子图鉴") }
@@ -602,7 +603,7 @@ class AutoScrollService : AccessibilityService() {
                     }
 
                     if (!isTargetPage) {
-                        if (allText.contains("收集度") && allText.contains("菌子")) {
+                        if (allText.contains("收集度") && allText.contains("菌")) {
                             isTargetPage = true
                         }
                     }

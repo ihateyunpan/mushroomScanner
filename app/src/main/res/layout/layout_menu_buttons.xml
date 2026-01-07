@@ -47,20 +47,6 @@
         android:layout_height="wrap_content" />
 
     <ImageButton
-        android:id="@+id/btn_log"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:padding="5dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_log"
-        android:tint="#FF9800" />
-
-    <Space
-        android:layout_width="4dp"
-        android:layout_height="wrap_content" />
-
-    <ImageButton
         android:id="@+id/btn_clear"
         android:layout_width="32dp"
         android:layout_height="32dp"
@@ -69,5 +55,19 @@
         android:scaleType="fitCenter"
         android:src="@drawable/ic_delete"
         android:tint="#F44336" />
+
+    <Space
+        android:layout_width="4dp"
+        android:layout_height="wrap_content" />
+
+    <ImageButton
+        android:id="@+id/btn_log"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:padding="5dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_log"
+        android:tint="#FF9800" />
 
 </LinearLayout>
