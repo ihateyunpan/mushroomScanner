@@ -659,7 +659,7 @@ class AutoScrollService : AccessibilityService() {
 
                     for (match in results.matches) {
                         if (collectedMushrooms.contains(match.name)) {
-                            appendLog("忽略已存在: $match.name")
+                            appendLog("忽略已存在: ${match.name}")
                         } else {
                             val logPrefix = if (match.isFuzzy) "✨ 模糊匹配" else "🎯 精确匹配"
                             appendLog("$logPrefix: ${match.name}")

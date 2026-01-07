@@ -248,7 +248,7 @@ class VideoAnalysisActivity : AppCompatActivity() {
                                         // 格式: [00:01:30]/[00:10:00] (15.0%)
                                         // 预计剩余: 00:08:30
                                         tvStatus.text =
-                                            "进度: [$timeFmt] / [$totalDurationFmt] ($percentStr%)\n预计剩余: $etaStr"
+                                            "进度: [$timeFmt] / [$totalDurationFmt] ($percentStr%)\n" + "已发现: ${sessionNewDiscovery.size} 个 | 预计剩余时间: $etaStr"
                                     }
                                 }
                             }
@@ -262,9 +262,9 @@ class VideoAnalysisActivity : AppCompatActivity() {
                     processedFrames++
                 }
 
-                val saveFile = File(getExternalFilesDir(null), "Video_OCR_Report_$timestamp.txt")
-                FileOutputStream(saveFile).use { it.write(outputBuilder.toString().toByteArray()) }
-                appendLogWithUI("✅ 分析完成! 报告已保存: ${saveFile.name}")
+//                val saveFile = File(getExternalFilesDir(null), "Video_OCR_Report_$timestamp.txt")
+//                FileOutputStream(saveFile).use { it.write(outputBuilder.toString().toByteArray()) }
+//                appendLogWithUI("✅ 分析完成! 报告已保存: ${saveFile.name}")
                 appendLogWithUI("🎉 共发现 ${sessionNewDiscovery.size} 种菌子")
 
             } catch (e: Exception) {
