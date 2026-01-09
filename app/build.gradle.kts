@@ -12,7 +12,7 @@ android {
         applicationId = "in.co.washing_machine.mushroomscanner"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
+        versionCode = 3
         versionName = "0.99.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

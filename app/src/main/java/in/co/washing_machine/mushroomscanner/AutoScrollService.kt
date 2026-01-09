@@ -41,7 +41,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import `in`.co.washing_machine.mushroomscanner.ocr.OcrResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,7 +48,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import kotlin.math.abs
 
 class AutoScrollService : AccessibilityService() {
@@ -709,9 +707,16 @@ class AutoScrollService : AccessibilityService() {
         g: ScanDataManager.GestureProfile,
         isTestRun: Boolean = false
     ) {
+        // 安全限制坐标，防止触摸到状态栏或导航栏导致手势失效
+        // 留出 1 像素的安全距离
+        val safeStartX = (g.startX * screenWidth).coerceIn(1f, screenWidth - 1f)
+        val safeStartY = (g.startY * screenHeight).coerceIn(1f, screenHeight - 1f)
+        val safeEndX = (g.endX * screenWidth).coerceIn(1f, screenWidth - 1f)
+        val safeEndY = (g.endY * screenHeight).coerceIn(1f, screenHeight - 1f)
+
         val path = Path().apply {
-            moveTo(g.startX * screenWidth, g.startY * screenHeight)
-            lineTo(g.endX * screenWidth, g.endY * screenHeight)
+            moveTo(safeStartX, safeStartY)
+            lineTo(safeEndX, safeEndY)
         }
         if (isTestRun) {
             serviceScope.launch {
@@ -736,17 +741,51 @@ class AutoScrollService : AccessibilityService() {
         val gestureBuilder = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
             .build()
-        dispatchGesture(gestureBuilder, object : GestureResultCallback() {
+
+        // 【修改 1】增加详细的回调处理，防止循环链断裂
+        val callback = object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                onFinish?.invoke()
-                if (onFinish == null) {
+                super.onCompleted(gestureDescription)
+                // 手势成功，继续后续逻辑
+                if (onFinish != null) {
+                    onFinish.invoke()
+                } else {
+                    // 继续下一次扫描循环
                     serviceScope.launch {
                         delay(ScanDataManager.waitAfterScrollMs.toLong())
                         scanLoop()
                     }
                 }
             }
-        }, null)
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                super.onCancelled(gestureDescription)
+                // 【核心修复】手势被取消时，必须处理，否则循环就断了
+                appendLog("⚠️ 滑动被系统取消 (onCancelled)")
+
+                // 策略：即使被取消，通常也应该尝试继续下一次扫描，或者重试
+                // 这里选择延迟后继续扫描，防止彻底卡死
+                if (isScanning) {
+                    serviceScope.launch {
+                        delay(ScanDataManager.waitAfterScrollMs.toLong() + 500) // 多等一会
+                        scanLoop()
+                    }
+                }
+            }
+        }
+
+        // 【修改 2】检查返回值，如果发送失败直接反馈
+        try {
+            val isDispatched = dispatchGesture(gestureBuilder, callback, null)
+            if (!isDispatched) {
+                appendLog("❌ 滑动请求发送失败 (dispatchGesture return false)")
+                // 发送失败通常意味着服务异常，最好停止或重试
+                stopScanning("滑动服务异常，无法执行手势")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            stopScanning("滑动执行报错: ${e.message}")
+        }
     }
 
     private fun showNotificationText(msg: String) {
