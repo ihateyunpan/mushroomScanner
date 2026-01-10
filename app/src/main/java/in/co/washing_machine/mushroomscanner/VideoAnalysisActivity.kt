@@ -2,6 +2,7 @@ package `in`.co.washing_machine.mushroomscanner
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
@@ -18,8 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -182,19 +181,21 @@ class VideoAnalysisActivity : AppCompatActivity() {
 
                 while (currentUs < totalDurationUs && isAnalyzing) {
                     try {
-                        val fullBitmap = retriever.getFrameAtTime(
+                        val rawBitmap = retriever.getFrameAtTime(
                             currentUs,
                             MediaMetadataRetriever.OPTION_CLOSEST
                         )
+                        val fullBitmap = if (rawBitmap?.config != Bitmap.Config.ARGB_8888) {
+                            val converted = rawBitmap?.copy(Bitmap.Config.ARGB_8888, true)
+                            rawBitmap?.recycle() // 转换后释放原始的
+                            converted
+                        } else {
+                            rawBitmap
+                        }
 
                         if (fullBitmap != null) {
-                            val (topRatio, bottomRatio) = ScanDataManager.scanRegionConfig ?: Pair(
-                                0.0f,
-                                0.0f
-                            )
-                            val cropY = (fullBitmap.height * topRatio).toInt()
-                            val cropHeight =
-                                (fullBitmap.height * (1.0f - topRatio - bottomRatio)).toInt()
+                            val cropY = 0
+                            val cropHeight = fullBitmap.height
 
                             if (cropHeight > 0) {
                                 val results = OcrCore.scanBitmap(fullBitmap, cropY, cropHeight, "")
